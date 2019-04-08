@@ -30,8 +30,8 @@ class _MyAppState extends State<MyApp> {
   String _playerTxt = '00:00:00';
   double _dbLevel;
 
-  double slider_current_position = 0.0;
-  double max_duration = 1.0;
+  int _sliderCurrentPosition = 0;
+  int _maxDuration = 1;
 
   TextEditingController _sampleRateController =
       TextEditingController(text: '44100');
@@ -64,6 +64,7 @@ class _MyAppState extends State<MyApp> {
       print('startRecorder: $path');
 
       _recorderSubscription = flutterSound.onRecorderStateChanged.listen((e) {
+        print('ee: ${e}');
         DateTime date = new DateTime.fromMillisecondsSinceEpoch(
             e.currentPosition.toInt(),
             isUtc: true);
@@ -119,8 +120,8 @@ class _MyAppState extends State<MyApp> {
     try {
       _playerSubscription = flutterSound.onPlayerStateChanged.listen((e) {
         if (e != null) {
-          slider_current_position = e.currentPosition;
-          max_duration = e.duration;
+          _sliderCurrentPosition = e.currentPosition;
+          _maxDuration = e.duration;
 
           DateTime date = new DateTime.fromMillisecondsSinceEpoch(
               e.currentPosition.toInt(),
@@ -319,15 +320,17 @@ class _MyAppState extends State<MyApp> {
               crossAxisAlignment: CrossAxisAlignment.center,
             ),
             Container(
-                height: 56.0,
-                child: Slider(
-                    value: slider_current_position,
-                    min: 0.0,
-                    max: max_duration,
-                    onChanged: (double value) async {
-                      await flutterSound.seekToPlayer(value.toInt());
-                    },
-                    divisions: max_duration.toInt()))
+              height: 56.0,
+              child: Slider(
+                value: _sliderCurrentPosition.toDouble(),
+                min: 0.0,
+                max: _maxDuration.toDouble(),
+                onChanged: (double value) async {
+                  await flutterSound.seekToPlayer(value.toInt());
+                },
+                divisions: _maxDuration.toInt(),
+              ),
+            )
           ],
         ),
       ),

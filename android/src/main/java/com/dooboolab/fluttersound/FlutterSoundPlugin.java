@@ -6,12 +6,14 @@ import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ExecutorService;
@@ -44,17 +46,37 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
   final private Handler recordHandler = new Handler();
   final private Handler dbPeakLevelHandler = new Handler();
   private static MethodChannel channel;
+  private static MethodChannel uiChannel;
+
+  private String playerPlaybackPath;
+  private String recorderOutputPath;
 
   /** Plugin registration. */
   public static void registerWith(Registrar registrar) {
     channel = new MethodChannel(registrar.messenger(), "flutter_sound");
     channel.setMethodCallHandler(new FlutterSoundPlugin());
+
+    uiChannel = new MethodChannel(registrar.messenger(), "flutter_sound/ui");
+
     reg = registrar;
+  }
+
+  private Handler handler;
+
+  private static  <T> String toString(T o, String nullDefault) {
+      if(o == null) {
+          return nullDefault;
+      }
+
+      return o.toString();
   }
 
   @Override
   public void onMethodCall(final MethodCall call, final Result result) {
-    final String path = call.argument("path");
+    if (handler == null) {
+      handler = new Handler(Looper.myLooper());
+    }
+    String path = toString(call.argument("path"), AudioModel.DEFAULT_FILE_LOCATION);
     switch (call.method) {
       case "startRecorder":
         taskScheduler.submit(() -> {
@@ -120,7 +142,7 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
   }
 
   @Override
-  public void startRecorder(int numChannels, int sampleRate, Integer bitRate, int androidEncoder, String path, final Result result) {
+  public void startRecorder(int numChannels, int sampleRate, Integer bitRate, int androidEncoder, final String path, final Result result) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       if (
           reg.activity().checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
@@ -130,16 +152,12 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
         }, 0);
-        result.error(TAG, "NO PERMISSION GRANTED", Manifest.permission.RECORD_AUDIO + " or " + Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        handler.post(() -> result.error(TAG, "NO PERMISSION GRANTED", Manifest.permission.RECORD_AUDIO + " or " + Manifest.permission.WRITE_EXTERNAL_STORAGE));
         return;
       }
     }
 
     Log.d(TAG, "startRecorder");
-
-    if (path == null) {
-      path = AudioModel.DEFAULT_FILE_LOCATION;
-    }
 
     if (this.model.getMediaRecorder() == null) {
       this.model.setMediaRecorder(new MediaRecorder());
@@ -157,6 +175,8 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
       }
     }
 
+    recorderOutputPath = path;
+
     try {
       this.model.getMediaRecorder().prepare();
       this.model.getMediaRecorder().start();
@@ -167,16 +187,12 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
       this.model.setRecorderTicker(() -> {
 
         long time = SystemClock.elapsedRealtime() - systemTime;
-//          Log.d(TAG, "elapsedTime: " + SystemClock.elapsedRealtime());
-//          Log.d(TAG, "time: " + time);
-
-//          DateFormat format = new SimpleDateFormat("mm:ss:SS", Locale.US);
-//          String displayTime = format.format(time);
-//          model.setRecordTime(time);
         try {
           JSONObject json = new JSONObject();
-          json.put("current_position", String.valueOf(time));
-          channel.invokeMethod("updateRecorderProgress", json.toString());
+          json.put("current_position", time);
+          json.put("file", recorderOutputPath);
+          Log.d(TAG, "json.toString(): " + json.toString());
+          handler.post(() -> uiChannel.invokeMethod("updateRecorderProgress", json.toString()));
           recordHandler.postDelayed(model.getRecorderTicker(), model.subsDurationMillis);
         } catch (JSONException je) {
           Log.d(TAG, "Json Exception: " + je.toString());
@@ -190,12 +206,12 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
           //int ratio = model.getMediaRecorder().getMaxAmplitude() / micBase;
           double dbLevel = 20 * Math.log10(model.getMediaRecorder().getMaxAmplitude() / model.micLevelBase);
           double normalizedDbLevel = Math.min(Math.pow(10, dbLevel / 20.0) * 160.0, 160.0);
-          channel.invokeMethod("updateDbPeakProgress", normalizedDbLevel);
+          handler.post(() -> uiChannel.invokeMethod("updateDbPeakProgress", normalizedDbLevel));
           dbPeakLevelHandler.postDelayed(model.getDbLevelTicker(), (FlutterSoundPlugin.this.model.peakLevelUpdateMillis));
         });
         dbPeakLevelHandler.post(this.model.getDbLevelTicker());
       }
-      result.success(path);
+        handler.post(() -> result.success(path));
     } catch (Exception e) {
       Log.e(TAG, "Exception: ", e);
     }
@@ -208,13 +224,14 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
     dbPeakLevelHandler.removeCallbacksAndMessages(null);
     if (this.model.getMediaRecorder() == null) {
       Log.d(TAG, "mediaRecorder is null");
-      result.error(ERR_RECORDER_IS_NULL, ERR_RECORDER_IS_NULL, ERR_RECORDER_IS_NULL);
+      handler.post(() -> result.error(ERR_RECORDER_IS_NULL, ERR_RECORDER_IS_NULL, ERR_RECORDER_IS_NULL));
+
       return;
     }
     this.model.getMediaRecorder().stop();
     this.model.getMediaRecorder().release();
     this.model.setMediaRecorder(null);
-    result.success("recorder stopped.");
+    handler.post(() -> result.success("recorder stopped."));
   }
 
   @Override
@@ -238,11 +255,9 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
     mTimer = new Timer();
 
     try {
-      if (path == null) {
-        this.model.getMediaPlayer().setDataSource(AudioModel.DEFAULT_FILE_LOCATION);
-      } else {
-        this.model.getMediaPlayer().setDataSource(path);
-      }
+    this.model.getMediaPlayer().setDataSource(path);
+
+      playerPlaybackPath = path;
 
       this.model.getMediaPlayer().setOnPreparedListener(mp -> {
         Log.d(TAG, "mediaPlayer prepared and start");
@@ -259,9 +274,10 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
             // final String displayTime = format.format(time);
             try {
               JSONObject json = new JSONObject();
-              json.put("duration", String.valueOf(mp.getDuration()));
-              json.put("current_position", String.valueOf(mp.getCurrentPosition()));
-              channel.invokeMethod("updateProgress", json.toString());
+              json.put("duration", Double.valueOf(mp.getDuration()));
+              json.put("current_position", Double.valueOf(mp.getCurrentPosition()));
+              json.put("file", playerPlaybackPath);
+              uiChannel.invokeMethod("updateProgress", json.toString());
             } catch (JSONException je) {
               Log.d(TAG, "Json Exception: " + je.toString());
             }
@@ -269,8 +285,7 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
         };
 
         mTimer.schedule(mTask, 0, model.subsDurationMillis);
-        String resolvedPath = path == null ? AudioModel.DEFAULT_FILE_LOCATION : path;
-        result.success((resolvedPath));
+          result.success((path));
       });
       /*
        * Detect when finish playing.
@@ -282,9 +297,10 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
         Log.d(TAG, "Plays completed.");
         try {
           JSONObject json = new JSONObject();
-          json.put("duration", String.valueOf(mp.getDuration()));
-          json.put("current_position", String.valueOf(mp.getCurrentPosition()));
-          channel.invokeMethod("audioPlayerDidFinishPlaying", json.toString());
+          json.put("duration", mp.getDuration());
+          json.put("current_position", mp.getCurrentPosition());
+          json.put("file", playerPlaybackPath);
+          uiChannel.invokeMethod("audioPlayerDidFinishPlaying", json.toString());
         } catch (JSONException je) {
           Log.d(TAG, "Json Exception: " + je.toString());
         }

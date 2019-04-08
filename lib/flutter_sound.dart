@@ -6,111 +6,77 @@ import 'package:flutter_sound/android_encoder.dart';
 import 'package:flutter_sound/ios_quality.dart';
 
 class FlutterSound {
-  static const MethodChannel _channel = const MethodChannel('flutter_sound');
-  static StreamController<RecordStatus> _recorderController;
-  static StreamController<double> _dbPeakController;
-  static StreamController<PlayStatus> _playerController;
-  /// Value ranges from 0 to 120
-  Stream<double> get onRecorderDbPeakChanged => _dbPeakController.stream;
-  Stream<RecordStatus> get onRecorderStateChanged => _recorderController.stream;
-  Stream<PlayStatus> get onPlayerStateChanged => _playerController.stream;
-
-  bool _isRecording = false;
-  bool _isPlaying = false;
-
-  Future<String> setSubscriptionDuration(double sec) async {
-    String result = await _channel
-        .invokeMethod('setSubscriptionDuration', <String, dynamic>{
-      'sec': sec,
-    });
-    return result;
-  }
-
-  Future<void> _setRecorderCallback() async {
-    if (_recorderController == null) {
-      _recorderController = new StreamController.broadcast();
-    }
-    if (_dbPeakController == null) {
-      _dbPeakController = new StreamController.broadcast();
-    }
-
-    _channel.setMethodCallHandler((MethodCall call) {
+  FlutterSound() {
+    _uiChannel.setMethodCallHandler((MethodCall call) {
+      print('call.method: ${call.method} + ${call.arguments}');
       switch (call.method) {
         case "updateRecorderProgress":
           Map<String, dynamic> result = json.decode(call.arguments);
-          _recorderController.add(new RecordStatus.fromJSON(result));
+          _recorderController.add(RecordStatus.fromJSON(result));
           break;
         case "updateDbPeakProgress":
           _dbPeakController.add(call.arguments);
           break;
-        default:
-          throw new ArgumentError('Unknown method ${call.method} ');
-      }
-    });
-  }
-
-  Future<void> _setPlayerCallback() async {
-    if (_playerController == null) {
-      _playerController = new StreamController.broadcast();
-    }
-
-    _channel.setMethodCallHandler((MethodCall call) {
-      switch (call.method) {
         case "updateProgress":
           Map<String, dynamic> result = jsonDecode(call.arguments);
-          _playerController.add(new PlayStatus.fromJSON(result));
+          _playerController.add(PlayStatus.fromJSON(result));
           break;
         case "audioPlayerDidFinishPlaying":
           Map<String, dynamic> result = jsonDecode(call.arguments);
-          PlayStatus status = new PlayStatus.fromJSON(result);
+          PlayStatus status = PlayStatus.fromJSON(result);
           if (status.currentPosition != status.duration) {
             status.currentPosition = status.duration;
           }
           _playerController.add(status);
           this._isPlaying = false;
-          _removePlayerCallback();
           break;
         default:
-          throw new ArgumentError('Unknown method ${call.method}');
+          throw ArgumentError('Unknown method ${call.method} ');
       }
+
+      return Future.value(true);
     });
   }
 
-  Future<void> _removeRecorderCallback() async {
-    if (_recorderController != null) {
-      _recorderController
-        ..add(null)
-        ..close();
-      _recorderController = null;
-    }
-  }
+  static const MethodChannel _channel = const MethodChannel('flutter_sound');
+  static const MethodChannel _uiChannel =
+      const MethodChannel('flutter_sound/ui');
 
-    Future<void> _removeDbPeakCallback() async {
-    if (_dbPeakController != null) {
-      _dbPeakController
-        ..add(null)
-        ..close();
-      _dbPeakController = null;
-    }
-  }
+  final StreamController<RecordStatus> _recorderController = StreamController();
+  final StreamController<double> _dbPeakController = StreamController();
+  final StreamController<PlayStatus> _playerController = StreamController();
 
-  Future<void> _removePlayerCallback() async {
-    if (_playerController != null) {
-      _playerController
-        ..add(null)
-        ..close();
-      _playerController = null;
-    }
+  Stream<RecordStatus> _recordStatusStream;
+  Stream<double> _dbPeakStream;
+  Stream<PlayStatus> _playStream;
+
+  /// Value ranges from 0 to 120
+  Stream<RecordStatus> get onRecorderStateChanged =>
+      _recordStatusStream ??= _recorderController.stream.asBroadcastStream();
+  Stream<double> get onRecorderDbPeakChanged =>
+      _dbPeakStream ??= _dbPeakController.stream.asBroadcastStream();
+  Stream<PlayStatus> get onPlayerStateChanged =>
+      _playStream ??= _playerController.stream.asBroadcastStream();
+
+  bool _isRecording = false;
+  bool _isPlaying = false;
+
+  Future<String> setSubscriptionDuration(double sec) {
+    return _channel
+        .invokeMethod<String>('setSubscriptionDuration', <String, dynamic>{
+      'sec': sec,
+    });
   }
 
   Future<String> startRecorder(String uri,
-      {int sampleRate = 44100, int numChannels = 2, int bitRate,
-        AndroidEncoder androidEncoder = AndroidEncoder.AAC,
-        IosQuality iosQuality = IosQuality.LOW
-      }) async {
+      {int sampleRate = 44100,
+      int numChannels = 2,
+      int bitRate,
+      AndroidEncoder androidEncoder = AndroidEncoder.AAC,
+      IosQuality iosQuality = IosQuality.LOW}) async {
     try {
-      String result =
-      await _channel.invokeMethod('startRecorder', <String, dynamic>{
+      String result = await _channel
+          .invokeMethod<String>('startRecorder', <String, dynamic>{
         'path': uri,
         'sampleRate': sampleRate,
         'numChannels': numChannels,
@@ -118,40 +84,34 @@ class FlutterSound {
         'androidEncoder': androidEncoder?.value,
         'iosQuality': iosQuality?.value
       });
-      _setRecorderCallback();
 
       if (this._isRecording) {
-        throw new Exception('Recorder is already recording.');
+        throw Exception('Recorder is already recording.');
       }
       this._isRecording = true;
       return result;
     } catch (err) {
-      throw new Exception(err);
+      throw Exception(err);
     }
   }
 
   Future<String> stopRecorder() async {
     if (!this._isRecording) {
-      throw new Exception('Recorder already stopped.');
+      throw Exception('Recorder already stopped.');
     }
 
-    String result = await _channel.invokeMethod('stopRecorder');
+    String result = await _channel.invokeMethod<String>('stopRecorder');
 
     this._isRecording = false;
-    _removeRecorderCallback();
-    _removeDbPeakCallback();
     return result;
   }
 
   Future<String> startPlayer(String uri) async {
     try {
       String result =
-          await _channel.invokeMethod('startPlayer', <String, dynamic>{
+          await _channel.invokeMethod<String>('startPlayer', <String, dynamic>{
         'path': uri,
       });
-      print('result: $result');
-
-      _setPlayerCallback();
 
       if (this._isPlaying) {
         throw Exception('Player is already playing.');
@@ -170,86 +130,81 @@ class FlutterSound {
     }
     this._isPlaying = false;
 
-    String result = await _channel.invokeMethod('stopPlayer');
-    _removePlayerCallback();
-    return result;
+    return _channel.invokeMethod<String>('stopPlayer');
   }
 
-  Future<String> pausePlayer() async {
-    String result = await _channel.invokeMethod('pausePlayer');
-    return result;
+  Future<String> pausePlayer() {
+    return _channel.invokeMethod<String>('pausePlayer');
   }
 
-  Future<String> resumePlayer() async {
-    String result = await _channel.invokeMethod('resumePlayer');
-    return result;
+  Future<String> resumePlayer() {
+    return _channel.invokeMethod<String>('resumePlayer');
   }
 
-  Future<String> seekToPlayer(int milliSecs) async {
-    String result =
-        await _channel.invokeMethod('seekToPlayer', <String, dynamic>{
+  Future<String> seekToPlayer(int milliSecs) {
+    return _channel.invokeMethod<String>('seekToPlayer', <String, dynamic>{
       'sec': milliSecs,
     });
-    return result;
   }
 
-  Future<String> setVolume(double volume) async {
+  Future<String> setVolume(double volume) {
     String result = '';
     if (volume < 0.0 || volume > 1.0) {
       result = 'Value of volume should be between 0.0 and 1.0.';
-      return result;
+      return Future.value(result);
     }
 
-    result = await _channel
-        .invokeMethod('setVolume', <String, dynamic>{
+    return _channel.invokeMethod<String>('setVolume', <String, dynamic>{
       'volume': volume,
     });
-    return result;
   }
 
   /// Defines the interval at which the peak level should be updated.
   /// Default is 0.8 seconds
-  Future<String> setDbPeakLevelUpdate(double intervalInSecs) async {
-    String result = await _channel
-      .invokeMethod('setDbPeakLevelUpdate', <String, dynamic>{
-    'intervalInSecs': intervalInSecs,
+  Future<String> setDbPeakLevelUpdate(double intervalInSecs) {
+    return _channel
+        .invokeMethod<String>('setDbPeakLevelUpdate', <String, dynamic>{
+      'intervalInSecs': intervalInSecs,
     });
-    return result;
   }
 
   /// Enables or disables processing the Peak level in db's. Default is disabled
-  Future<String> setDbLevelEnabled(bool enabled) async {
-    String result = await _channel
-      .invokeMethod('setDbLevelEnabled', <String, dynamic>{
-    'enabled': enabled,
+  Future<String> setDbLevelEnabled(bool enabled) {
+    return _channel.invokeMethod<String>('setDbLevelEnabled', <String, dynamic>{
+      'enabled': enabled,
     });
-    return result;
   }
 }
 
 class RecordStatus {
-  final double currentPosition;
+  final int currentPosition;
+  final String file;
 
   RecordStatus.fromJSON(Map<String, dynamic> json)
-      : currentPosition = double.parse(json['current_position']);
+      : currentPosition = json['current_position'],
+        file = json['file'];
 
   @override
   String toString() {
-    return 'currentPosition: $currentPosition';
+    return 'currentPosition: $currentPosition, '
+        'file: $file';
   }
 }
 
 class PlayStatus {
-  final double duration;
-  double currentPosition;
+  final int duration;
+  int currentPosition;
+  final String file;
 
   PlayStatus.fromJSON(Map<String, dynamic> json)
-      : duration = double.parse(json['duration']),
-        currentPosition = double.parse(json['current_position']);
+      : duration = json['duration'],
+        currentPosition = json['current_position'],
+        file = json['file'];
 
   @override
   String toString() {
     return 'duration: $duration, '
-        'currentPosition: $currentPosition';
+        'currentPosition: $currentPosition, '
+        'file: $file';
   }
 }
