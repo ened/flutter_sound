@@ -37,12 +37,13 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
   private static final String ERR_RECORDER_IS_RECORDING = "ERR_RECORDER_IS_RECORDING";
 
   private final ExecutorService taskScheduler = Executors.newSingleThreadExecutor();
+  private final Handler mainThreadHandler = new Handler();
+  private final Handler recordHandler = new Handler();
+  private final Handler dbPeakLevelHandler = new Handler();
 
   private static Registrar reg;
   final private AudioModel model = new AudioModel();
   private Timer mTimer = new Timer();
-  final private Handler recordHandler = new Handler();
-  final private Handler dbPeakLevelHandler = new Handler();
   private static MethodChannel channel;
 
   /** Plugin registration. */
@@ -130,7 +131,10 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
         }, 0);
-        result.error(TAG, "NO PERMISSION GRANTED", Manifest.permission.RECORD_AUDIO + " or " + Manifest.permission.WRITE_EXTERNAL_STORAGE);
+
+        mainThreadHandler.post(
+            () -> result.error(TAG, "NO PERMISSION GRANTED", Manifest.permission.RECORD_AUDIO + " or " + Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        );
         return;
       }
     }
@@ -176,7 +180,8 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
         try {
           JSONObject json = new JSONObject();
           json.put("current_position", String.valueOf(time));
-          channel.invokeMethod("updateRecorderProgress", json.toString());
+
+          recordHandler.post(() -> channel.invokeMethod("updateRecorderProgress", json.toString()));
           recordHandler.postDelayed(model.getRecorderTicker(), model.subsDurationMillis);
         } catch (JSONException je) {
           Log.d(TAG, "Json Exception: " + je.toString());
@@ -190,12 +195,14 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
           //int ratio = model.getMediaRecorder().getMaxAmplitude() / micBase;
           double dbLevel = 20 * Math.log10(model.getMediaRecorder().getMaxAmplitude() / model.micLevelBase);
           double normalizedDbLevel = Math.min(Math.pow(10, dbLevel / 20.0) * 160.0, 160.0);
-          channel.invokeMethod("updateDbPeakProgress", normalizedDbLevel);
+          dbPeakLevelHandler.post(
+              () -> channel.invokeMethod("updateDbPeakProgress", normalizedDbLevel));
           dbPeakLevelHandler.postDelayed(model.getDbLevelTicker(), (FlutterSoundPlugin.this.model.peakLevelUpdateMillis));
         });
         dbPeakLevelHandler.post(this.model.getDbLevelTicker());
       }
-      result.success(path);
+      String finalPath = path;
+      dbPeakLevelHandler.post(() -> result.success(finalPath));
     } catch (Exception e) {
       Log.e(TAG, "Exception: ", e);
     }
@@ -216,7 +223,8 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
     this.model.getMediaRecorder().reset();
     this.model.getMediaRecorder().release();
     this.model.setMediaRecorder(null);
-    result.success("recorder stopped.");
+
+    mainThreadHandler.post(() -> result.success("recorder stopped."));
   }
 
   @Override
@@ -227,12 +235,12 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
 
       if (isPaused) {
         this.model.getMediaPlayer().start();
-        result.success("player resumed.");
+        mainThreadHandler.post(() -> result.success("player resumed."));
         return;
       }
 
       Log.e(TAG, "Player is already running. Stop it first.");
-      result.success("player is already running.");
+      mainThreadHandler.post(() -> result.success("player is already running."));
       return;
     } else {
       this.model.setMediaPlayer(new MediaPlayer());
@@ -263,7 +271,7 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
               JSONObject json = new JSONObject();
               json.put("duration", String.valueOf(mp.getDuration()));
               json.put("current_position", String.valueOf(mp.getCurrentPosition()));
-              channel.invokeMethod("updateProgress", json.toString());
+              mainThreadHandler.post(() -> channel.invokeMethod("updateProgress", json.toString()));
             } catch (JSONException je) {
               Log.d(TAG, "Json Exception: " + je.toString());
             }
@@ -272,7 +280,7 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
 
         mTimer.schedule(mTask, 0, model.subsDurationMillis);
         String resolvedPath = path == null ? AudioModel.DEFAULT_FILE_LOCATION : path;
-        result.success((resolvedPath));
+        mainThreadHandler.post(() -> result.success((resolvedPath)));
       });
       /*
        * Detect when finish playing.
@@ -286,7 +294,7 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
           JSONObject json = new JSONObject();
           json.put("duration", String.valueOf(mp.getDuration()));
           json.put("current_position", String.valueOf(mp.getCurrentPosition()));
-          channel.invokeMethod("audioPlayerDidFinishPlaying", json.toString());
+          mainThreadHandler.post(() -> channel.invokeMethod("audioPlayerDidFinishPlaying", json.toString()));
         } catch (JSONException je) {
           Log.d(TAG, "Json Exception: " + je.toString());
         }
@@ -302,7 +310,7 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
       this.model.getMediaPlayer().prepare();
     } catch (Exception e) {
       Log.e(TAG, "startPlayer() exception");
-      result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage());
+      mainThreadHandler.post(() -> result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage()));
     }
   }
 
@@ -311,7 +319,7 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
     mTimer.cancel();
 
     if (this.model.getMediaPlayer() == null) {
-      result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL);
+      mainThreadHandler.post(() -> result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL));
       return;
     }
 
@@ -320,55 +328,55 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
       this.model.getMediaPlayer().reset();
       this.model.getMediaPlayer().release();
       this.model.setMediaPlayer(null);
-      result.success("stopped player.");
+      mainThreadHandler.post(() -> result.success("stopped player."));
     } catch (Exception e) {
       Log.e(TAG, "stopPlay exception: " + e.getMessage());
-      result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage());
+      mainThreadHandler.post(() -> result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage()));
     }
   }
 
   @Override
   public void pausePlayer(final Result result) {
     if (this.model.getMediaPlayer() == null) {
-      result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL);
+      mainThreadHandler.post(() -> result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL));
       return;
     }
 
     try {
       this.model.getMediaPlayer().pause();
-      result.success("paused player.");
+      mainThreadHandler.post(() -> result.success("paused player."));
     } catch (Exception e) {
       Log.e(TAG, "pausePlay exception: " + e.getMessage());
-      result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage());
+      mainThreadHandler.post(() -> result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage()));
     }
   }
 
   @Override
   public void resumePlayer(final Result result) {
     if (this.model.getMediaPlayer() == null) {
-      result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL);
+      mainThreadHandler.post(() -> result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL));
       return;
     }
 
     if (this.model.getMediaPlayer().isPlaying()) {
-      result.error(ERR_PLAYER_IS_PLAYING, ERR_PLAYER_IS_PLAYING, ERR_PLAYER_IS_PLAYING);
+      mainThreadHandler.post(() -> result.error(ERR_PLAYER_IS_PLAYING, ERR_PLAYER_IS_PLAYING, ERR_PLAYER_IS_PLAYING));
       return;
     }
 
     try {
       this.model.getMediaPlayer().seekTo(this.model.getMediaPlayer().getCurrentPosition());
       this.model.getMediaPlayer().start();
-      result.success("resumed player.");
+      mainThreadHandler.post(() -> result.success("resumed player."));
     } catch (Exception e) {
       Log.e(TAG, "mediaPlayer resume: " + e.getMessage());
-      result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage());
+      mainThreadHandler.post(() -> result.error(ERR_UNKNOWN, ERR_UNKNOWN, e.getMessage()));
     }
   }
 
   @Override
   public void seekToPlayer(int millis, final Result result) {
     if (this.model.getMediaPlayer() == null) {
-      result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL);
+      mainThreadHandler.post(() -> result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL));
       return;
     }
 
@@ -379,36 +387,36 @@ public class FlutterSoundPlugin implements MethodCallHandler, PluginRegistry.Req
     Log.d(TAG, "seekTo: " + millis);
 
     this.model.getMediaPlayer().seekTo(millis);
-    result.success(String.valueOf(millis));
+    mainThreadHandler.post(() -> result.success(String.valueOf(millis)));
   }
 
   @Override
   public void setVolume(double volume, final Result result) {
     if (this.model.getMediaPlayer() == null) {
-      result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL);
+      mainThreadHandler.post(() -> result.error(ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL, ERR_PLAYER_IS_NULL));
       return;
     }
 
     float mVolume = (float) volume;
     this.model.getMediaPlayer().setVolume(mVolume, mVolume);
-    result.success("Set volume");
+    mainThreadHandler.post(() -> result.success("Set volume"));
   }
 
   @Override
   public void setDbPeakLevelUpdate(double intervalInSecs, Result result) {
     this.model.peakLevelUpdateMillis = (long) (intervalInSecs * 1000);
-    result.success("setDbPeakLevelUpdate: " + this.model.peakLevelUpdateMillis);
+    mainThreadHandler.post(() -> result.success("setDbPeakLevelUpdate: " + this.model.peakLevelUpdateMillis));
   }
 
   @Override
   public void setDbLevelEnabled(boolean enabled, MethodChannel.Result result) {
     this.model.shouldProcessDbLevel = enabled;
-    result.success("setDbLevelEnabled: " + this.model.shouldProcessDbLevel);
+    mainThreadHandler.post(() -> result.success("setDbLevelEnabled: " + this.model.shouldProcessDbLevel));
   }
 
   @Override
   public void setSubscriptionDuration(double sec, Result result) {
     this.model.subsDurationMillis = (int) (sec * 1000);
-    result.success("setSubscriptionDuration: " + this.model.subsDurationMillis);
+    mainThreadHandler.post(() -> result.success("setSubscriptionDuration: " + this.model.subsDurationMillis));
   }
 }
