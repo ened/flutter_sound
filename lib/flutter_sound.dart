@@ -40,14 +40,17 @@ class FlutterSound {
       switch (call.method) {
         case "updateRecorderProgress":
           Map<String, dynamic> result = json.decode(call.arguments);
-          _recorderController.add(new RecordStatus.fromJSON(result));
+          if (_recorderController != null)
+            _recorderController.add(new RecordStatus.fromJSON(result));
           break;
         case "updateDbPeakProgress":
+        if (_dbPeakController!= null)
           _dbPeakController.add(call.arguments);
           break;
         default:
           throw new ArgumentError('Unknown method ${call.method} ');
       }
+      return null;
     });
   }
 
@@ -60,7 +63,8 @@ class FlutterSound {
       switch (call.method) {
         case "updateProgress":
           Map<String, dynamic> result = jsonDecode(call.arguments);
-          _playerController.add(new PlayStatus.fromJSON(result));
+          if (_playerController!=null)
+            _playerController.add(new PlayStatus.fromJSON(result));
           break;
         case "audioPlayerDidFinishPlaying":
           Map<String, dynamic> result = jsonDecode(call.arguments);
@@ -68,13 +72,15 @@ class FlutterSound {
           if (status.currentPosition != status.duration) {
             status.currentPosition = status.duration;
           }
-          _playerController.add(status);
+          if (_playerController != null)
+            _playerController.add(status);
           this._isPlaying = false;
           _removePlayerCallback();
           break;
         default:
           throw new ArgumentError('Unknown method ${call.method}');
       }
+      return null;
     });
   }
 
@@ -108,8 +114,15 @@ class FlutterSound {
   Future<String> startRecorder(String uri,
       {int sampleRate = 44100, int numChannels = 2, int bitRate,
         AndroidEncoder androidEncoder = AndroidEncoder.AAC,
-        IosQuality iosQuality = IosQuality.LOW
+        AndroidAudioSource androidAudioSource = AndroidAudioSource.MIC,
+        AndroidOutputFormat androidOutputFormat = AndroidOutputFormat.MPEG_4,
+        IosQuality iosQuality = IosQuality.LOW,
       }) async {
+        
+    if (this._isRecording) {
+      throw new RecorderRunningException('Recorder is already recording.');
+    }
+
     try {
       String result =
       await _channel.invokeMethod('startRecorder', <String, dynamic>{
@@ -118,13 +131,12 @@ class FlutterSound {
         'numChannels': numChannels,
         'bitRate': bitRate,
         'androidEncoder': androidEncoder?.value,
+        'androidAudioSource': androidAudioSource?.value,
+        'androidOutputFormat': androidOutputFormat?.value,
         'iosQuality': iosQuality?.value
       });
       _setRecorderCallback();
 
-      if (this._isRecording) {
-        throw new Exception('Recorder is already recording.');
-      }
       this._isRecording = true;
       return result;
     } catch (err) {
@@ -134,7 +146,7 @@ class FlutterSound {
 
   Future<String> stopRecorder() async {
     if (!this._isRecording) {
-      throw new Exception('Recorder already stopped.');
+      throw new RecorderStoppedException('Recorder is already stopped.');
     }
 
     String result = await _channel.invokeMethod('stopRecorder');
@@ -146,18 +158,21 @@ class FlutterSound {
   }
 
   Future<String> startPlayer(String uri) async {
+    if (this._isPlaying) {
+      this.resumePlayer();
+      return 'Player resumed';
+      // throw PlayerRunningException('Player is already playing.');
+    }
+
     try {
       String result =
           await _channel.invokeMethod('startPlayer', <String, dynamic>{
         'path': uri,
       });
-      print('result: $result');
+      print('startPlayer result: $result');
 
       _setPlayerCallback();
 
-      if (this._isPlaying) {
-        throw Exception('Player is already playing.');
-      }
       this._isPlaying = true;
 
       return result;
@@ -168,7 +183,7 @@ class FlutterSound {
 
   Future<String> stopPlayer() async {
     if (!this._isPlaying) {
-      throw Exception('Player already stopped.');
+      throw PlayerStoppedException('Player already stopped.');
     }
     this._isPlaying = false;
 
@@ -178,21 +193,36 @@ class FlutterSound {
   }
 
   Future<String> pausePlayer() async {
-    String result = await _channel.invokeMethod('pausePlayer');
-    return result;
+    try {
+      String result = await _channel.invokeMethod('pausePlayer');
+      return result;
+    } catch (err) {
+      print('err: $err');
+      return err;
+    }
   }
 
   Future<String> resumePlayer() async {
-    String result = await _channel.invokeMethod('resumePlayer');
-    return result;
+    try {
+      String result = await _channel.invokeMethod('resumePlayer');
+      return result;
+    } catch (err) {
+      print('err: $err');
+      return err;
+    }
   }
 
   Future<String> seekToPlayer(int milliSecs) async {
-    String result =
-        await _channel.invokeMethod('seekToPlayer', <String, dynamic>{
-      'sec': milliSecs,
-    });
-    return result;
+    try {
+      String result =
+          await _channel.invokeMethod('seekToPlayer', <String, dynamic>{
+        'sec': milliSecs,
+      });
+      return result;
+    } catch (err) {
+      print('err: $err');
+      return err;
+    }
   }
 
   Future<String> setVolume(double volume) async {
@@ -255,3 +285,24 @@ class PlayStatus {
         'currentPosition: $currentPosition';
   }
 }
+
+class PlayerRunningException implements Exception {
+  final String message;
+  PlayerRunningException(this.message);
+}
+
+class PlayerStoppedException implements Exception {
+  final String message;
+  PlayerStoppedException(this.message);
+}
+
+class RecorderRunningException implements Exception {
+  final String message;
+  RecorderRunningException(this.message);
+}
+
+class RecorderStoppedException implements Exception {
+  final String message;
+  RecorderStoppedException(this.message);
+}
+

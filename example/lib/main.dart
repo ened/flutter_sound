@@ -1,8 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:intl/date_symbol_data_local.dart';
 
-import 'dart:io';
 import 'dart:async';
 import 'package:flutter_sound/flutter_sound.dart';
 
@@ -17,7 +17,8 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   bool _isRecording = false;
-  bool _isPlaying = false;
+  String _path;
+  // bool _isPlaying = false;
   StreamSubscription _recorderSubscription;
   StreamSubscription _dbPeakSubscription;
   StreamSubscription _playerSubscription;
@@ -27,8 +28,8 @@ class _MyAppState extends State<MyApp> {
   String _playerTxt = '00:00:00';
   double _dbLevel;
 
-  double slider_current_position = 0.0;
-  double max_duration = 1.0;
+  double sliderCurrentPosition = 0.0;
+  double maxDuration = 1.0;
 
 
   @override
@@ -43,7 +44,7 @@ class _MyAppState extends State<MyApp> {
 
   void startRecorder() async{
     try {
-      String path = await flutterSound.startRecorder(null);
+      String path = await flutterSound.startRecorder(Platform.isIOS ? 'ios.m4a' : 'android.mp4');
       print('startRecorder: $path');
 
       _recorderSubscription = flutterSound.onRecorderStateChanged.listen((e) {
@@ -66,6 +67,7 @@ class _MyAppState extends State<MyApp> {
 
       this.setState(() {
         this._isRecording = true;
+        this._path = path;
       });
     } catch (err) {
       print('startRecorder error: $err');
@@ -95,15 +97,15 @@ class _MyAppState extends State<MyApp> {
   }
 
   void startPlayer() async{
-    String path = await flutterSound.startPlayer(null);
-    await flutterSound.setVolume(1.0);
-    print('startPlayer: $path');
-
     try {
+      String path = await flutterSound.startPlayer(this._path);
+      await flutterSound.setVolume(1.0);
+      print('startPlayer: $path');
+
       _playerSubscription = flutterSound.onPlayerStateChanged.listen((e) {
         if (e != null) {
-          slider_current_position = e.currentPosition;
-          max_duration = e.duration;
+          sliderCurrentPosition = e.currentPosition;
+          maxDuration = e.duration;
 
 
           DateTime date = new DateTime.fromMillisecondsSinceEpoch(
@@ -111,7 +113,7 @@ class _MyAppState extends State<MyApp> {
               isUtc: true);
           String txt = DateFormat('mm:ss:SS', 'en_GB').format(date);
           this.setState(() {
-            this._isPlaying = true;
+            //this._isPlaying = true;
             this._playerTxt = txt.substring(0, 8);
           });
         }
@@ -131,7 +133,7 @@ class _MyAppState extends State<MyApp> {
       }
 
       this.setState(() {
-        this._isPlaying = false;
+        //this._isPlaying = false;
       });
     } catch (err) {
       print('error: $err');
@@ -281,13 +283,13 @@ class _MyAppState extends State<MyApp> {
             Container(
               height: 56.0,
               child: Slider(
-                value: slider_current_position,
+                value: sliderCurrentPosition,
                 min: 0.0,
-                max: max_duration,
+                max: maxDuration,
                 onChanged: (double value) async{
                   await flutterSound.seekToPlayer(value.toInt());
                 },
-                divisions: max_duration.toInt()
+                divisions: maxDuration.toInt()
               )
             )
           ],

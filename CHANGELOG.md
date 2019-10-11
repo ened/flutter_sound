@@ -1,3 +1,16 @@
+## 1.4.8
++ Resolve [#129](https://github.com/dooboolab/flutter_sound/issues/129)
+## 1.4.7
++ Resolve few issues on `ios` record path.
++ Resolve issue `playing` status so player can resume.
++ Resolve [#134](https://github.com/dooboolab/flutter_sound/issues/134)
++ Resolve [#135](https://github.com/dooboolab/flutter_sound/issues/135)
+## 1.4.4
++ Stopped recording generating infinite db values [#131](https://github.com/dooboolab/flutter_sound/pull/131)
+## 1.4.3
++ Improved db calcs [#123](https://github.com/dooboolab/flutter_sound/pull/123)
+## 1.4.2
++ Fixed 'mediaplayer went away with unhandled events' bug [#104](https://github.com/dooboolab/flutter_sound/pull/104)
 ## 1.4.1
 + Fixed 'mediaplayer went away with unhandled events' bug [#83](https://github.com/dooboolab/flutter_sound/pull/83)
 ## 1.4.0
